@@ -14,7 +14,7 @@ headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.3
                          '(KHTML, like Gecko) Chrome/49.0.2623.221 Safari/537.36 SE 2.X MetaSr 1.0'}
 feichangzun = 'http://www.variflight.com'
 allUrl = "http://www.variflight.com/sitemap.html?AE71649A58c77="
-pausetime = 30000
+pausetime = 1000
 
 
 class HANDL:
@@ -27,17 +27,23 @@ class FCZPAC:
     @retry(wait_fixed=pausetime)
     def getoneipaddress(self):
         try:
-            r = requests.get('http://127.0.0.1:5000/get')
+            r = requests.get('http://127.0.0.1:5010/get/')
             proxy = BeautifulSoup(r.text, "lxml").get_text()
             ip = 'http://' + proxy
             proxies = {
-                "http": ip,
-                "https": ip
+                "http": ip
             }
             print(proxies)
         except:
-            print("no more ip address please waite {} seconds".format(pausetime/1000))
-            raise IOError("no more ip address please waite.")
+            print("no more ip address pleasewaite {} seconds".format(30))
+            raise IOError("no more ip address.")
+        try:
+            startHtml = requests.get('http://icanhazip.com ', headers=headers, proxies=proxies)
+        except:
+            deleteurl = 'http://127.0.0.1:5010/delete/?proxy=339.84..19195.116:8560'+proxy
+            con = requests.get(deleteurl)
+            print("cant connect, waite {} seconds".format(pausetime/1000))
+            raise IOError("cant connect.")
         return proxies
 
     def getquerydate(self, aircarfNo):
@@ -72,9 +78,24 @@ class FCZPAC:
                 flightlink.append(allA[i].get('href'))
         return HANDL(flight, flightlink)
 
+    def jangeListHtml(self, url, listHtml, ips):
+        text = listHtml.find('p').get_text()
+        jsonstr = json.loads(text)['msg']
+        if jsonstr == 'IP blocked':
+            proxy = ips['http'].split('http://')[1]   # 删除无效的IP
+            delurl = 'http://127.0.0.1:5010/delete/?proxy='+proxy
+            invaild = requests.get(delurl)
+            newip = self.getoneipaddress()
+            print('get a new ip')
+            newlistHtml = requests.get(url, headers=headers, proxies=newip)
+            listSoup = BeautifulSoup(newlistHtml.text, 'lxml')
+            return listSoup, newip
+        else:
+            return listHtml, ips
+
     @retry
     def getListData(self, flightlink, flightstr):
-        # ips = self.getoneipaddress()
+        ips = self.getoneipaddress()
         today = datetime.datetime.now().date()
         allflightLink = []
         for i in range(len(flightlink)):
@@ -87,10 +108,15 @@ class FCZPAC:
                 for n in range(1, looptimes+1):
                     querydate = alreadydate + datetime.timedelta(days=n)
                     url = tmpurl + '&fdate={}'.format(querydate.strftime("%Y%m%d"))
+                    print("发送请求")
                     # 发送请求
-                    listHtml = requests.get(url, headers=headers)
+                    listHtml = requests.get(url, headers=headers, proxies=ips)
                     sleep(1)
-                    listSoup = BeautifulSoup(listHtml.text, 'lxml')
+                    testlistSoup = BeautifulSoup(listHtml.text, 'lxml')
+                    print("获得结果", testlistSoup)
+                    jangedata = self.jangeListHtml(url, testlistSoup, ips)
+                    listSoup = jangedata[0]
+                    ips = jangedata[1]
                     listUrl = listSoup.find('div', class_='fly_list')
                     if listUrl is not None:
                         listhref = listUrl.find('div', class_='li_box').find_all('a')
@@ -99,7 +125,8 @@ class FCZPAC:
                                 print('find a schedule link')
                                 flightlist.append(link.get('href'))
                     else:
-                        break
+                        print("no data:", n)
+                        continue
                     allflightLink.append(flightlist)
             elif alreadydate is None:
                 # print("当查询结果为空的时候")
@@ -110,9 +137,12 @@ class FCZPAC:
                     url2 = tmpurl2 + '&fdate={}'.format(querydate2.strftime("%Y%m%d"))
                     # print("空查询link", url2)
                     # 发送请求
-                    listHtml2 = requests.get(url2, headers=headers)
+                    listHtml2 = requests.get(url2, headers=headers, proxies=ips)
                     sleep(1)
-                    listSoup2 = BeautifulSoup(listHtml2.text, 'lxml')
+                    testlistSoup2 = BeautifulSoup(listHtml2.text, 'lxml')
+                    jangedata = self.jangeListHtml(url2, testlistSoup2, ips)
+                    listSoup2 = jangedata[0]
+                    ips = jangedata[1]
                     listUrl2 = listSoup2.find('div', class_='fly_list')
                     if listUrl2 is not None:
                         listhref2 = listUrl2.find('div', class_='li_box').find_all('a')
@@ -126,16 +156,19 @@ class FCZPAC:
         return allflightLink                  # [[一个航班],[]]
 
     @retry
-    def getaflightinfo(self, aflight):     # 传进来一个航班的[link],获取到这个航班的信息
-        # ips = self.getoneipaddress()
+    def getaflightinfo(self, aflight, ips):     # 传进来一个航班的[link],获取到这个航班的信息
         flightinfolist = []
+        newips = ips
         for el in aflight:
             flightinfo = {}
             url = feichangzun + el
             # 发送请求
-            listHtml = requests.get(url, headers=headers)
+            listHtml = requests.get(url, headers=headers, proxies=newips)
             sleep(1)
-            listSoup = BeautifulSoup(listHtml.text, 'lxml')
+            testlistSoup = BeautifulSoup(listHtml.text, 'lxml')
+            jangedata = self.jangeListHtml(url, testlistSoup, newips)
+            listSoup = jangedata[0]
+            newips = jangedata[1]
             qfcity = listSoup.find('div', class_='cir_l curr').get_text().strip()
             ddcity = listSoup.find('div', class_='cir_r').get_text().strip()
             code = el.split('/')[2].split('-')
@@ -189,17 +222,20 @@ class FCZPAC:
             flightinfo['fno'] = fno
             print('get a schedule from a schedule list')
             flightinfolist.append(flightinfo)
-        return flightinfolist
+        return flightinfolist, newips
 
     def start(self):
         flightdata = self.getchuanghanglist()
         flightlink = flightdata.flightlink
         flightstr = flightdata.flight
         listLink = self.getListData(flightlink, flightstr)
+        ips = self.getoneipaddress()
         for flight in listLink:
             flightdic = {}
             info = {}
-            flightinfo = self.getaflightinfo(flight)
+            flightinfodata = self.getaflightinfo(flight, ips)
+            flightinfo = flightinfodata[0]
+            ips = flightinfodata[1]
             if len(flightinfo) == 1:
                 init = 0
                 info['from'] = flightinfo[init]['qf']
